@@ -93,7 +93,7 @@ HTML_CONTENT = """<!DOCTYPE html>
             <svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
             </svg>
-            Key is sent directly through HTTPS and is never stored or logged.
+            Direct HTTPS call. Key is never saved, logged, or stored.
           </p>
         </div>
 
@@ -150,11 +150,19 @@ HTML_CONTENT = """<!DOCTYPE html>
       resultBox.innerHTML = '';
 
       try {
-        const res = await fetch('/api/check-key', {
+        let res = await fetch('/api/check-key', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ api_key: apiKey })
         });
+
+        if (res.status === 404) {
+          res = await fetch('/check-key', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ api_key: apiKey })
+          });
+        }
 
         const data = await res.json();
         renderResult(data);
@@ -248,12 +256,11 @@ HTML_CONTENT = """<!DOCTYPE html>
 """
 
 
-@app.get("/", response_class=HTMLResponse)
-async def serve_index():
-    return HTML_CONTENT
-
-
+# Handle POST test routes across all potential rewrite paths
 @app.post("/api/check-key")
+@app.post("/check-key")
+@app.post("/api/index.py/check-key")
+@app.post("/api/index.py/api/check-key")
 async def check_key(req: KeyRequest):
     key = req.api_key.strip()
     if not key:
@@ -349,3 +356,12 @@ async def check_key(req: KeyRequest):
         "auth_ok": True,
     }
 
+
+# Catch-all GET: matches /, /api, /api/index.py, or any other sub-path on Vercel
+@app.get("/", response_class=HTMLResponse)
+@app.get("/api", response_class=HTMLResponse)
+@app.get("/api/", response_class=HTMLResponse)
+@app.get("/api/index.py", response_class=HTMLResponse)
+@app.get("/{full_path:path}", response_class=HTMLResponse)
+async def serve_index(full_path: str = ""):
+    return HTML_CONTENT
