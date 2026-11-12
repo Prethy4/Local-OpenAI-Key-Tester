@@ -1,6 +1,6 @@
 import os
 import sys
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from openai import OpenAI, AuthenticationError, RateLimitError, APIError
@@ -150,21 +150,20 @@ HTML_CONTENT = """<!DOCTYPE html>
       resultBox.innerHTML = '';
 
       try {
-        let res = await fetch('/api/check-key', {
+        const res = await fetch(window.location.pathname || '/', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ api_key: apiKey })
         });
 
-        if (res.status === 404) {
-          res = await fetch('/check-key', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ api_key: apiKey })
-          });
+        const data = await res.json();
+
+        // Normalize if server returned standard error object
+        if (data.detail && !data.message) {
+          data.message = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail);
+          data.title = 'Error (' + res.status + ')';
         }
 
-        const data = await res.json();
         renderResult(data);
       } catch (err) {
         renderResult({
@@ -219,7 +218,7 @@ HTML_CONTENT = """<!DOCTYPE html>
                 <span class="text-sm font-bold text-white">${data.title || badgeText}</span>
                 <span class="text-xs px-2.5 py-0.5 rounded-full border font-medium ${badgeClass}">${badgeText}</span>
               </div>
-              <p class="text-xs text-slate-300 leading-relaxed">${data.message}</p>
+              <p class="text-xs text-slate-300 leading-relaxed">${data.message || ''}</p>
             </div>
           </div>
 
@@ -256,11 +255,9 @@ HTML_CONTENT = """<!DOCTYPE html>
 """
 
 
-# Handle POST test routes across all potential rewrite paths
-@app.post("/api/check-key")
-@app.post("/check-key")
-@app.post("/api/index.py/check-key")
-@app.post("/api/index.py/api/check-key")
+# Universal POST handler: matches ANY path on Vercel or local
+@app.post("/")
+@app.post("/{full_path:path}")
 async def check_key(req: KeyRequest):
     key = req.api_key.strip()
     if not key:
@@ -357,11 +354,8 @@ async def check_key(req: KeyRequest):
     }
 
 
-# Catch-all GET: matches /, /api, /api/index.py, or any other sub-path on Vercel
+# Universal GET handler: serves the HTML on any GET path
 @app.get("/", response_class=HTMLResponse)
-@app.get("/api", response_class=HTMLResponse)
-@app.get("/api/", response_class=HTMLResponse)
-@app.get("/api/index.py", response_class=HTMLResponse)
 @app.get("/{full_path:path}", response_class=HTMLResponse)
 async def serve_index(full_path: str = ""):
     return HTML_CONTENT
